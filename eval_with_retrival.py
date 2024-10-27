@@ -295,7 +295,7 @@ def pretrain_roberta(train_dataset, val_dataset):
     trainer.train()
 
 
-def roberta_test(train_dataset, test_dataset):
+def final_test(train_dataset, test_dataset):
     model_dir = "/home/icdm/CodeSpace/nlp_test/pretrained_best"
     loaded_model, loaded_tokenizer = load_model_and_tokenizer(model_dir)
     # 打印最佳模型的评估结果
@@ -352,15 +352,16 @@ def predict_with_saved_model(text, model_dir):
 if __name__ == "__main__":
     # 读取txt文件并解析
     train_file_path = "/home/icdm/CodeSpace/nlp_test/train_data_32k.txt"
-    # test_file_path = "/home/icdm/CodeSpace/nlp_test/test_data_32k.txt"
+    test_file_path = "/home/icdm/CodeSpace/nlp_test/test_data_32k.txt"
+    
     train_data = parse_txt_file(train_file_path)
-    # test_data = parse_txt_file(test_file_path)
+    test_data = parse_txt_file(test_file_path)
     train_data, val_data = train_test_split(train_data, test_size=0.2, random_state=42)
 
     # 转换为 Hugging Face Dataset 格式
     train_dataset = Dataset.from_list(train_data)
     val_dataset = Dataset.from_list(val_data)
-    # test_dataset = Dataset.from_list(test_data)
+    test_dataset = Dataset.from_list(test_data)
 
     # 预处理标签
     def preprocess_labels(example):
@@ -369,13 +370,11 @@ if __name__ == "__main__":
 
     train_dataset = train_dataset.map(preprocess_labels)
     val_dataset = val_dataset.map(preprocess_labels)
-    # test_dataset = test_dataset.map(preprocess_labels)
+    test_dataset = test_dataset.map(preprocess_labels)
 
     # pretrain_roberta(train_dataset, val_dataset)
-    roberta_test(train_dataset, val_dataset)
-
-
-    # # 测试GAT模型
+    
+    # # 预训练GAT检索模型
     # origin_txt_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/train_data_32k.txt'
     # bert_path = r'/home/icdm/CodeSpace/nlp_test/pretrained_best'
     # model_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/result/train_graph_attention_text_classi_50_MSE_2024-10-26_16-34-30/trained_model/model_17.pth'
@@ -403,3 +402,5 @@ if __name__ == "__main__":
     # print("accuracy:" ,accuracy)
     # print(output)         
     # print(output_features)
+    final_test(train_dataset, test_file_path)
+
