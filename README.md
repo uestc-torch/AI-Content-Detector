@@ -4,6 +4,7 @@
 
 
 <img width="946" alt="image" src="https://github.com/user-attachments/assets/da9f8325-4b83-4b08-b8b4-863604752b7c">
+
 下表是我们在切分出的验证集上的评估效果:
 
 | Metric  | LLM-QW7B | RetrievalWithUnpretrainedModel | Pretrained Model | RetrievalWithPretrainedModel(Ours) |
