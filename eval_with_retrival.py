@@ -482,7 +482,7 @@ if __name__ == "__main__":
 
     # pretrain_model(train_dataset, val_dataset)
     # pretrain_gat()
-    test_gat()
+    # test_gat()
     model_test(train_dataset, val_dataset)
 
 
