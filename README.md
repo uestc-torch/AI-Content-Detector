@@ -9,4 +9,5 @@
 | QW7B | RetrievalWithUnpretrainedModel | Pretrained Model | RetrievalWithPretrainedModel |
 |------|--------------------------------|------------------|------------------------------|
 | 53%  | 94.5%                          | 96%              | 98%                          |
+
 测试时运行eval_with_retrival.py即可正常输出结果至evaluation_results.csv文件，同时模型也会输出eval_accuracy结果
