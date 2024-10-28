@@ -74,21 +74,11 @@ def predict(model_path, A, mean_pooling_vec, retrieved_label_list, retrieved_tex
     A = torch.stack(list(A)).to('cuda:0')
     mean_pooling_vec = torch.tensor(mean_pooling_vec, dtype=torch.float32).to('cuda:0')
     retrieved_label_list = torch.tensor(retrieved_label_list, dtype=torch.float32).to('cuda:0')
-    # 先转换为 numpy 数组
     retrieved_textual_feature_embedding = np.array(retrieved_textual_feature_embedding)
 
-    # 然后再转换为 PyTorch tensor
     retrieved_textual_feature_embedding = torch.tensor(retrieved_textual_feature_embedding, dtype=torch.float32).to('cuda:0')
     retrieved_label_list = retrieved_label_list[:,1:]
-    retrieved_textual_feature_embedding = retrieved_textual_feature_embedding[:,1:,:]
-
-    # print(
-    #     f"A: {A.shape}\n"
-    #     f"mean_pooling_vec: {mean_pooling_vec.shape}\n"
-    #     f"retrieved_label_list: {retrieved_label_list.shape}\n"
-    #     f"retrieved_textual_feature_embedding: {retrieved_textual_feature_embedding.shape}\n"
-    # )
-                                                       
+    retrieved_textual_feature_embedding = retrieved_textual_feature_embedding[:,1:,:]                                                  
 
     with torch.no_grad():
 
@@ -251,7 +241,7 @@ def compute_metrics_with_prob(pred):
     return {"accuracy": accuracy}
 
 
-def pretrain_roberta(train_dataset, val_dataset):
+def pretrain_model(train_dataset, val_dataset):
         
     # 加载模型和分词器
     model_name = "/home/icdm/CodeSpace/nlp_test/roberta-base/"
@@ -295,7 +285,7 @@ def pretrain_roberta(train_dataset, val_dataset):
     trainer.train()
 
 
-def final_test(train_dataset, test_dataset):
+def model_test(train_dataset, test_dataset):
     model_dir = "/home/icdm/CodeSpace/nlp_test/pretrained_best"
     loaded_model, loaded_tokenizer = load_model_and_tokenizer(model_dir)
     # 打印最佳模型的评估结果
@@ -333,9 +323,125 @@ def final_test(train_dataset, test_dataset):
 
     tester.evaluate()
 
-def train_gat():
+def pretrain_gat(batch_size=32):
 
-    GAT_main()
+    train_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/train.pkl'
+    valid_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/valid.pkl'
+    test_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/test.pkl'
+    dataset_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/dataset.pkl'
+
+    dataset = pd.read_pickle(dataset_path)
+    train_data, temp_data = train_test_split(dataset, test_size=0.2, random_state=42)
+    valid_data, test_data = train_test_split(temp_data, test_size=0.5, random_state=42)
+    train_data.reset_index(drop=True, inplace=True)
+    valid_data.reset_index(drop=True, inplace=True)
+    test_data.reset_index(drop=True, inplace=True)
+    # Extract text
+    train_text = train_data['Content'].tolist()
+    valid_text = valid_data['Content'].tolist()
+    test_text = test_data['Content'].tolist()
+    # Generate embeddings
+    train_embeddings = text2vec(train_text, batch_size=batch_size)
+    valid_embeddings = text2vec(valid_text, batch_size=batch_size)
+    test_embeddings = text2vec(test_text, batch_size=batch_size)
+    # Add embeddings to DataFrame
+    train_data['mean_pooling_vec'] = train_embeddings.tolist()
+    valid_data['mean_pooling_vec'] = valid_embeddings.tolist()
+    test_data['mean_pooling_vec'] = test_embeddings.tolist()
+    # Save the datasets
+    train_data.to_pickle(train_path)
+    valid_data.to_pickle(valid_path)
+    test_data.to_pickle(test_path)
+
+    print('Text to vector is done!')
+
+    retrieval_data = pd.concat([train_data, valid_data], axis=0)
+    retrieval_data.reset_index(drop=True, inplace=True)
+
+    retrieve_vecs = torch.stack([torch.tensor(vec) for vec in retrieval_data['mean_pooling_vec']])
+
+    def retrieval_data(data):
+        retrieved_text_vec = []
+        retrieved_label = []
+
+        for i in tqdm(range(0, len(data), batch_size)):
+            batch_q_vecs = torch.stack([torch.tensor(vec) for vec in data['mean_pooling_vec'][i:i+batch_size]])
+            
+            sim_scores = retrieve_item(batch_q_vecs, retrieve_vecs)
+            _, top_k_ids = torch.topk(sim_scores, 51, dim=-1)
+
+            for idx, top_k_id in enumerate(top_k_ids):
+                top_k_id = top_k_id.tolist()
+                top_k_id = top_k_id[1:]
+                retrieved_text_vec.append([retrieval_data['mean_pooling_vec'][j] for j in top_k_id])
+                retrieved_label.append([float(retrieval_data['Label'][j]) for j in top_k_id])
+
+        data['retrieved_textual_feature_embedding'] = retrieved_text_vec
+        data['retrieved_label'] = retrieved_label
+        return data
+
+    train_data = retrieval(train_data)
+    valid_data = retrieval(valid_data)
+    test_data = retrieval(test_data)
+    train_data.reset_index(drop=True, inplace=True)
+    valid_data.reset_index(drop=True, inplace=True)
+    test_data.reset_index(drop=True, inplace=True)
+    train_data.to_pickle(train_path)
+    valid_data.to_pickle(valid_path)
+    test_data.to_pickle(test_path)
+
+    print('Retrieval is done!')
+
+    GAT_main(dataset_path=r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset', 
+             dataset_id='text_classi',
+                model_id='graph_attention',
+                retrieval_num=50,
+                epochs=1000,
+                batch_size=16,
+                early_stop_turns=10,
+                loss='BCE',
+                optim='Adam',
+                lr=1e-5,
+                decay_rate=1.0,
+                metric='MSE',
+                save=r'/home/icdm/CodeSpace/nlp_test/retrieval/result')
+
+    print('GAT is done!')
+    return train_path, valid_path, test_path
+
+    
+
+def test_gat():
+
+    origin_txt_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/train_data_32k.txt'
+    bert_path = r'/home/icdm/CodeSpace/nlp_test/pretrained_best'
+    model_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/result/train_graph_attention_text_classi_50_MSE_2024-10-26_16-34-30/trained_model/model_17.pth'
+
+    train_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/train.pkl'
+    valid_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/valid.pkl'
+    test_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/test.pkl'
+    dataset_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/dataset.pkl'
+    origin_dataset_process(origin_txt_path, train_path, valid_path, test_path, dataset_path)
+    base_text, base_label, query_text = test(train_path, valid_path, test_path)
+
+    base_embeddings = text2vec(bert_path, base_text, batch_size=32)
+    query_embeddings = text2vec(bert_path, query_text, batch_size=32)
+    print('Text to vector is done!')
+
+    retrieved_text_vec, retrieved_label = retrieval(query_embeddings, base_embeddings, base_label, batch_size=32)
+    print('Retrieval is done!')
+
+    A_list = process_matrix(retrieved_label, retrieval_num=50)
+    print('Matrix is done!')
+
+    output, output_features = predict(model_path, A_list, query_embeddings, retrieved_label, retrieved_text_vec)
+    predict = output.argmax(axis=-1)
+    accuracy = (predict == np.array(base_label)).mean()
+    # print(output)         
+    print(predict)
+    # print("accuracy:" ,accuracy)
+    return output, output_features
+
 
 
 # 示例：如何加载保存的模型进行预测
@@ -347,60 +453,37 @@ def predict_with_saved_model(text, model_dir):
         predictions = torch.argmax(outputs.logits, dim=1)
     return predictions.item()
 
-
-# 使用示例
-if __name__ == "__main__":
+def prepare_data_for_prediction():
     # 读取txt文件并解析
     train_file_path = "/home/icdm/CodeSpace/nlp_test/train_data_32k.txt"
-    test_file_path = "/home/icdm/CodeSpace/nlp_test/test_data_32k.txt"
-    
+    # test_file_path = "/home/icdm/CodeSpace/nlp_test/test_data_32k.txt"
     train_data = parse_txt_file(train_file_path)
-    test_data = parse_txt_file(test_file_path)
+    # test_data = parse_txt_file(test_file_path)
     train_data, val_data = train_test_split(train_data, test_size=0.2, random_state=42)
 
     # 转换为 Hugging Face Dataset 格式
     train_dataset = Dataset.from_list(train_data)
     val_dataset = Dataset.from_list(val_data)
-    test_dataset = Dataset.from_list(test_data)
+    # test_dataset = Dataset.from_list(test_data)
 
-    # 预处理标签
     def preprocess_labels(example):
         example['labels'] = int(example['labels'])
         return example
 
     train_dataset = train_dataset.map(preprocess_labels)
     val_dataset = val_dataset.map(preprocess_labels)
-    test_dataset = test_dataset.map(preprocess_labels)
+    # test_dataset = test_dataset.map(preprocess_labels)
 
-    # pretrain_roberta(train_dataset, val_dataset)
+    return train_dataset, val_dataset
+
+if __name__ == "__main__":
+
+    train_dataset, val_dataset = prepare_data_for_prediction()
+
+    # pretrain_model(train_dataset, val_dataset)
+    # pretrain_gat()
+    test_gat()
+    model_test(train_dataset, val_dataset)
+
+
     
-    # # 预训练GAT检索模型
-    # origin_txt_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/train_data_32k.txt'
-    # bert_path = r'/home/icdm/CodeSpace/nlp_test/pretrained_best'
-    # model_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/result/train_graph_attention_text_classi_50_MSE_2024-10-26_16-34-30/trained_model/model_17.pth'
-
-    # train_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/train.pkl'
-    # valid_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/valid.pkl'
-    # test_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/test.pkl'
-    # dataset_path = r'/home/icdm/CodeSpace/nlp_test/retrieval/dataset/text_classi/dataset.pkl'
-    # origin_dataset_process(origin_txt_path, train_path, valid_path, test_path, dataset_path)
-    # base_text, base_label, query_text = test(train_path, valid_path, test_path)
-
-    # base_embeddings = text2vec(bert_path, base_text, batch_size=32)
-    # query_embeddings = text2vec(bert_path, query_text, batch_size=32)
-    # print('Text to vector is done!')
-
-    # retrieved_text_vec, retrieved_label = retrieval(query_embeddings, base_embeddings, base_label, batch_size=32)
-    # print('Retrieval is done!')
-
-    # A_list = process_matrix(retrieved_label, retrieval_num=50)
-    # print('Matrix is done!')
-
-    # output, output_features = predict(model_path, A_list, query_embeddings, retrieved_label, retrieved_text_vec)
-    # predict = output.argmax(axis=-1)
-    # accuracy = (predict == np.array(base_label)).mean()
-    # print("accuracy:" ,accuracy)
-    # print(output)         
-    # print(output_features)
-    final_test(train_dataset, test_file_path)
-
